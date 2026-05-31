@@ -2,6 +2,7 @@ import requests
 import ccxt
 import pandas as pd
 import mplfinance as mpf
+import time
 
 # ======================
 # TELEGRAM
@@ -11,22 +12,34 @@ CHAT_ID = "8108131641"
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        requests.post(url, data={
-            "chat_id": CHAT_ID,
-            "text": text
-        }, timeout=10)
-    except Exception as e:
-        print("Telegram error:", e)
+    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+
+def send_photo():
+    url = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
+    with open("chart.png", "rb") as f:
+        requests.post(url, data={"chat_id": CHAT_ID}, files={"photo": f})
+
 
 # ======================
-# BINGX
+# EXCHANGE
 # ======================
 bingx = ccxt.bingx({"enableRateLimit": True})
-symbol_bingx = "BTC/USDT"
+
 
 # ======================
-# MEXC SAFE DATA (FIXED 8 COLUMNS ISSUE)
+# TIMEFRAMES
+# ======================
+timeframes = {
+    "1H": "1h",
+    "2H": "1h",   # FIX (BingX safe)
+    "4H": "1h"    # FIX (BingX safe)
+}
+
+symbol_bingx = "BTC/USDT"
+
+
+# ======================
+# MEXC DATA
 # ======================
 def get_mexc_ohlcv(symbol="BTCUSDT", interval="60m", limit=100):
     try:
@@ -40,14 +53,12 @@ def get_mexc_ohlcv(symbol="BTCUSDT", interval="60m", limit=100):
 
         data = r.json()
 
-        if not isinstance(data, list) or len(data) < 50:
+        if not isinstance(data, list):
             return None
 
         cleaned = []
         for c in data:
-            cleaned.append([
-                c[0], c[1], c[2], c[3], c[4], c[5]
-            ])
+            cleaned.append([c[0], c[1], c[2], c[3], c[4], c[5]])
 
         df = pd.DataFrame(cleaned, columns=[
             "time","open","high","low","close","volume"
@@ -75,7 +86,7 @@ def get_bingx_ohlcv(tf="1h"):
     try:
         data = bingx.fetch_ohlcv(symbol_bingx, timeframe=tf, limit=100)
 
-        if not data or len(data) < 50:
+        if not data:
             return None
 
         df = pd.DataFrame(data, columns=[
@@ -123,26 +134,20 @@ def make_chart(df, level):
             savefig="chart.png"
         )
     except Exception as e:
-        print("Chart error:", e)
+        print("CHART ERROR:", e)
 
 
 # ======================
-# MAIN
+# MAIN LOGIC
 # ======================
 def main():
 
-    timeframes = {
-        "1H": "1h",
-        "2H": "2h",
-        "4H": "4h"
-    }
-
     # ======================
-    # MEXC
+    # MEXC SCAN
     # ======================
     for tf_name, tf in timeframes.items():
 
-        df = get_mexc_ohlcv("BTCUSDT", "60m")
+        df = get_mexc_ohlcv("BTCUSDT", tf)   # FIX HERE
 
         if df is None:
             print("MEXC NO DATA")
@@ -163,6 +168,7 @@ def main():
         if touch and vol and rejection:
 
             make_chart(df, level)
+            send_photo()
 
             send_telegram(
                 f"🔴 MEXC SIGNAL\n"
@@ -171,8 +177,9 @@ def main():
                 f"Level: {level:.2f}"
             )
 
+
     # ======================
-    # BINGX
+    # BINGX SCAN
     # ======================
     for tf_name, tf in timeframes.items():
 
@@ -197,6 +204,7 @@ def main():
         if touch and vol and rejection:
 
             make_chart(df, level)
+            send_photo()
 
             send_telegram(
                 f"🔵 BINGX SIGNAL\n"
@@ -207,6 +215,8 @@ def main():
 
 
 # ======================
-# RUN
+# 24/7 LOOP (FIX FOR RENDER)
 # ======================
-main()
+while True:
+    main()
+    time.sleep(300)
